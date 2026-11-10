@@ -25,17 +25,19 @@ dp = Dispatcher()
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# إعدادات yt-dlp قوية ومخصصة لتجاوز حظر إنستجرام
+# إعدادات متطورة جداً لتجاوز حظر إنستجرام وقراءة الكوكيز بدقة
 def get_ydl_opts(base_opts: dict) -> dict:
     if os.path.exists("cookies.txt"):
         base_opts['cookiefile'] = "cookies.txt"
     
     base_opts.update({
-        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 313.0.0.30.115',
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'referer': 'https://www.instagram.com/',
         'extractor_args': {'instagram': {'api_hostname': 'i.instagram.com'}},
-        'socket_timeout': 30,
-        'geo_bypass': True,
+        'nocheckcertificate': True,
+        'ignoreerrors': False,
+        'no_warnings': True,
+        'quiet': True
     })
     return base_opts
 
@@ -116,7 +118,7 @@ async def cmd_start(message: types.Message):
                 [InlineKeyboardButton(text="📢 اشترك في القناة", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
                 [InlineKeyboardButton(text="✅ تحقق من الاشتراك", callback_data="check_sub")]
             ])
-            return await message.answer("⚠️ **يجب عليك الاشتراك في قناة البوت أولاً!**\nاشترك ثم اضغط تحقق 👇", reply_markup=keyboard)
+            return message.answer("⚠️ **يجب عليك الاشتراك في قناة البوت أولاً!**\nاشترك ثم اضغط تحقق 👇", reply_markup=keyboard)
 
     lang_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -153,8 +155,7 @@ async def set_lang_ar(callback: types.CallbackQuery):
         f"أهلاً بك يا **{user.first_name}** في بوت التحميل الشامل 🚀👑\n\n"
         "✨ **مميزات البوت:**\n"
         "• تحميل الفيديوهات والريلز بجودات عالية جداً.\n"
-        "• دعم منصات متعددة (إنستجرام، تيك توك، يوتيوب، فيسبوك وغيرها).\n"
-        "• تحميل ستوري وحسابات إنستجرام بسهولة تامة.\n\n"
+        "• دعم منصات متعددة (إنستجرام، تيك توك، يوتيوب، فيسبوك وغيرها).\n\n"
         f"🔗 **رابط مشاركتك لدعوة الأصدقاء:**\n`{ref_link}`\n\n"
         "📥 **فقط أرسل أي رابط وسأقوم بتحميله لك فوراً!**"
     )
@@ -175,8 +176,7 @@ async def set_lang_en(callback: types.CallbackQuery):
         f"Welcome **{user.first_name}** to the Ultimate Media Downloader Bot 🚀👑\n\n"
         "✨ **Bot Features:**\n"
         "• Download videos & reels in high quality.\n"
-        "• Support multiple platforms (Instagram, TikTok, YouTube, Facebook, etc.).\n"
-        "• Easily download Instagram stories and profiles.\n\n"
+        "• Support multiple platforms (Instagram, TikTok, YouTube, Facebook, etc.).\n\n"
         f"🔗 **Your referral link to invite friends:**\n`{ref_link}`\n\n"
         "📥 **Just send any link and I will download it for you instantly!**"
     )
@@ -222,65 +222,93 @@ async def handle_media_url(message: types.Message):
         return await message.answer("❌ لم أتمكن من العثور على رابط صحيح.")
     
     url = url_match.group(0)
-    process_msg = await message.answer("⏳ **جاري تحليل الرابط والتحميل الفوري...**", parse_mode="Markdown")
+    process_msg = await message.answer("⏳ **جاري جلب الفيديو الآن...**", parse_mode="Markdown")
 
+    filename = None
     try:
         loop = asyncio.get_running_loop()
         
+        # محاولة التحميل بالطريقة المباشرة
         ydl_opts = get_ydl_opts({
             'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
-            'format': 'best/bestvideo+bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
+            'format': 'best',
             'noplaylist': True
         })
 
         def download_media():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-                return info, filename
+                return info, ydl.prepare_filename(info)
 
         info, filename = await loop.run_in_executor(None, download_media)
-        title = info.get('title', 'محتوى بدون عنوان')
+        title = info.get('title', 'Media')
         add_history(user_id, url, title)
 
         if filename and os.path.exists(filename):
             file_size = os.path.getsize(filename) / (1024 * 1024)
             if file_size > 50:
-                await process_msg.edit_text("⚠️ عذراً، حجم الملف أكبر من الحد المسموح لتليجرام (50 ميجابايت).")
+                await process_msg.edit_text("⚠️ عذراً، حجم الملف أكبر من 50 ميجابايت.")
                 os.remove(filename)
                 return
 
             input_file = types.FSInputFile(filename)
             if filename.endswith(('.mp4', '.mkv', '.webm', '.mov')):
-                await message.answer_video(video=file_input, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
+                await message.answer_video(video=input_file, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
             elif filename.endswith(('.jpg', '.jpeg', '.png', '.webp')):
-                await message.answer_photo(photo=file_input, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
+                await message.answer_photo(photo=input_file, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
             else:
-                await message.answer_document(document=file_input, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
+                await message.answer_document(document=input_file, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
             
             await process_msg.delete()
+        else:
+            await process_msg.edit_text("❌ لم يتم العثور على الملف.")
+
+    except Exception as e:
+        logging.error(f"Download Error: {e}")
+        # محاولة بديلة سريعة لو فشلت الطريقة الأولى
+        try:
+            ydl_opts_fallback = get_ydl_opts({
+                'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
+                'format': 'bestvideo+bestaudio/best',
+                'merge_output_format': 'mp4',
+                'noplaylist': True
+            })
+            def download_fallback():
+                with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    return info, ydl.prepare_filename(info)
+            
+            info, filename = await loop.run_in_executor(None, download_fallback)
+            title = info.get('title', 'Media')
+            
+            if filename and os.path.exists(filename):
+                input_file = types.FSInputFile(filename)
+                await message.answer_video(video=input_file, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
+                await process_msg.delete()
+            else:
+                await process_msg.edit_text("❌ عذراً، تعذر التحميل. يجدر التذكير أن إنستجرام يحظر السيرفرات المجانية مؤقتاً.")
+        except Exception as err:
+            logging.error(f"Fallback Error: {err}")
+            await process_msg.edit_text("❌ عذراً، فشل التحميل. إنستجرام يفرض قيوداً صارمة على سيرفرات الاستضافة المجانية حالياً.")
+
+    finally:
+        if filename and os.path.exists(filename):
             try:
                 os.remove(filename)
             except:
                 pass
-        else:
-            await process_msg.edit_text("❌ لم يتم العثور على الملف المحمل.")
-
-    except Exception as e:
-        logging.error(f"Download Error: {e}")
-        await process_msg.edit_text("❌ عذراً، حدث خطأ أثناء التحميل. تأكد من صحة الرابط أو أن الحساب عام (Public).")
 
 @dp.message(F.text)
 async def handle_other_text(message: types.Message):
-    await message.answer("💡 أهلاً بك! أرسل رابط الفيديو مباشرة للتحميل الفوري 🚀\nWelcome! Send a video link directly to download.")
+    await message.answer("💡 أهلاً بك! أرسل رابط الفيديو مباشرة للتحميل الفوري 🚀")
 
 async def main():
-    logging.info("🚀 البوت يعمل الآن بكامل طاقته وتجاوز حماية إنستجرام...")
+    logging.info("🚀 البوت يعمل الآن...")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except Exception:
+        pass
+    async def startup():
         pass
     await dp.start_polling(bot, skip_updates=True)
 
