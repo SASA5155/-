@@ -16,8 +16,8 @@ logging.basicConfig(
     stream=sys.stdout
 )
 
-# التوكن الذي أرسلته
-TOKEN = "6485657013:AAE6oSf5STLnQqcTR1IqvFBaVcvEzzKfgV8"
+# جلب المتغيرات البيئية بأمان
+TOKEN = os.getenv("TOKEN", "6485657013:AAE6oSf5STLnQqcTR1IqvFBaVcvEzzKfgV8")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@YourChannelUsername")
 
@@ -29,6 +29,14 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 ACTIVE_USERS = set()      
 URL_CACHE = {}            
+
+# دالة مساعدة لإضافة الكوكيز لـ yt-dlp تلقائياً إن وجدت
+def get_ydl_opts(base_opts: dict) -> dict:
+    if os.path.exists("cookies.txt"):
+        base_opts['cookiefile'] = "cookies.txt"
+    # إضافة ترويسات متصفح وهمي لمنع الحظر
+    base_opts.setdefault('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    return base_opts
 
 # --- قاعدة البيانات ---
 def init_db():
@@ -88,16 +96,6 @@ def add_history(user_id, url, title):
         conn = sqlite3.connect('bot_database.db')
         cursor = conn.cursor()
         cursor.execute('INSERT INTO history (user_id, url, title) VALUES (?, ?, ?)', (user_id, url, title))
-        conn.commit()
-        conn.close()
-    except Exception:
-        pass
-
-def toggle_ban_user(user_id, status):
-    try:
-        conn = sqlite3.connect('bot_database.db')
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET is_banned = ? WHERE user_id = ?', (status, user_id))
         conn.commit()
         conn.close()
     except Exception:
@@ -244,7 +242,7 @@ async def cmd_broadcast(message: types.Message):
             pass
     await status.edit_text(f"📊 تم الإرسال بنجاح إلى: {success}")
 
-# --- معالجة الروابط (منشورات فردية أو حسابات إنستجرام) ---
+# --- معالجة الروابط ---
 @dp.message(F.text.regexp(r'https?://\S+'))
 async def handle_media_url(message: types.Message):
     user_id = message.from_user.id
@@ -264,9 +262,6 @@ async def handle_media_url(message: types.Message):
         return await message.answer("❌ لم أتمكن من العثور على رابط صحيح.")
     
     url = url_match.group(0)
-    
-    # 🔍 التحقق هل الرابط حساب إنستجرام (Profile) أم منشور عادي؟
-    # روابط الحسابات عادة لا تحتوي على /p/ أو /reel/ أو /tv/ أو /stories/ وتكون مرتبطة باسم المستخدم
     is_ig_profile = "instagram.com" in url and not any(x in url for x in ["/p/", "/reel/", "/tv/", "/stories/"])
 
     cache_key = f"{user_id}_{message.message_id}"
@@ -274,7 +269,6 @@ async def handle_media_url(message: types.Message):
     ACTIVE_USERS.add(user_id)
 
     if is_ig_profile:
-        # إذا كان رابط حساب إنستجرام، اعرض خيارات الستوري والهايلات والمنشورات
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="📖 تحميل الستوري (Stories)", callback_data=f"ig_opt:stories:{cache_key}"),
@@ -288,13 +282,13 @@ async def handle_media_url(message: types.Message):
         ])
         await message.answer("👤 **تم التعرف على حساب إنستجرام!**\nما الذي ترغب في تحميله من هذا الحساب؟ 👇", parse_mode="Markdown", reply_markup=keyboard)
     else:
-        # منشور فردي عادي (يوتيوب، تيك توك، إنستجرام بوست...)
         process_msg = await message.answer("⏳ **جاري تحليل الرابط واستخراج المعاينة الذكية...**", parse_mode="Markdown")
 
         try:
             loop = asyncio.get_running_loop()
             def extract_info():
-                with yt_dlp.YoutubeDL({'quiet': True, 'no_warnings': True, 'noplaylist': True}) as ydl:
+                ydl_opts = get_ydl_opts({'quiet': True, 'no_warnings': True, 'noplaylist': True})
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     return ydl.extract_info(url, download=False)
 
             info = await loop.run_in_executor(None, extract_info)
@@ -331,9 +325,9 @@ async def handle_media_url(message: types.Message):
         except Exception as e:
             logging.error(f"Preview Error: {e}")
             ACTIVE_USERS.discard(user_id)
-            await process_msg.edit_text("❌ عذراً، لم أتمكن من قراءة الرابط. قد يكون الحساب خاصاً أو غير مدعوم.")
+            await process_msg.edit_text("❌ عذراً، لم أتمكن من قراءة الرابط. قد يكون الحساب خاصاً أو غير مدعوم أو تتطلب الكوكيز تحديثاً.")
 
-# --- معالجة خيارات حسابات إنستجرام (ستوري، هايلات، منشورات) ---
+# --- معالجة خيارات حسابات إنستجرام ---
 @dp.callback_query(F.data.startswith("ig_opt:"))
 async def process_ig_options(callback: types.CallbackQuery):
     data_parts = callback.data.split(":")
@@ -353,24 +347,20 @@ async def process_ig_options(callback: types.CallbackQuery):
         "posts_all": "جميع منشورات الحساب"
     }
     
-    await callback.message.edit_text(f"⏳ **جاري جلب وتحميل {option_names.get(option, 'المحتوى')}... قد يستغرق ذلك بعض الوقت.**", parse_mode="Markdown")
+    await callback.message.edit_text(f"⏳ **جاري جلب وتحميل {option_names.get(option, 'المحتوى')} عبر الكوكيز...**", parse_mode="Markdown")
     
     filename = None
     try:
         loop = asyncio.get_running_loop()
         
-        # إعدادات yt-dlp للتعامل مع الستوري أو الحسابات
-        ydl_opts = {
+        ydl_opts = get_ydl_opts({
             'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
             'format': 'best',
             'quiet': True,
-        }
+        })
         
         if option == "posts_5":
             ydl_opts['playlistend'] = 5
-        elif option == "stories":
-            # بعض الروابط تتطلب صيغة مخصصة للستوري عبر yt-dlp
-            pass
 
         def download_profile():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -379,7 +369,6 @@ async def process_ig_options(callback: types.CallbackQuery):
 
         ydl_instance, info = await loop.run_in_executor(None, download_profile)
         
-        # التعامل مع القوائم (Entries) إذا كان الحساب يضم عدة صور/فيديوهات
         if 'entries' in info:
             count = 0
             for entry in info['entries']:
@@ -397,7 +386,7 @@ async def process_ig_options(callback: types.CallbackQuery):
                             os.remove(entry_file)
                         except:
                             pass
-            await callback.message.answer("✅ تم الانتهاء من إرسال المحتوى المطلوبة بنجاح!")
+            await callback.message.answer("✅ تم الانتهاء من إرسال المحتوى المطلوب بنجاح!")
         else:
             filename = ydl_instance.prepare_filename(info)
             if filename and os.path.exists(filename):
@@ -437,13 +426,13 @@ async def process_quality_choice(callback: types.CallbackQuery):
         loop = asyncio.get_running_loop()
         
         if quality_type == "best":
-            ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'format': 'bestvideo+bestaudio/best', 'merge_output_format': 'mp4', 'noplaylist': True, 'quiet': True}
+            ydl_opts = get_ydl_opts({'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'format': 'bestvideo+bestaudio/best', 'merge_output_format': 'mp4', 'noplaylist': True, 'quiet': True})
         elif quality_type == "medium":
-            ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'format': 'best[height<=480]/best', 'noplaylist': True, 'quiet': True}
+            ydl_opts = get_ydl_opts({'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'format': 'best[height<=480]/best', 'noplaylist': True, 'quiet': True})
         elif quality_type == "audio":
-            ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}], 'noplaylist': True, 'quiet': True}
+            ydl_opts = get_ydl_opts({'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}], 'noplaylist': True, 'quiet': True})
         elif quality_type == "sub":
-            ydl_opts = {'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'writesubtitles': True, 'writeautomaticsub': True, 'skip_download': True, 'subtitleslangs': ['ar', 'en'], 'quiet': True}
+            ydl_opts = get_ydl_opts({'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s', 'writesubtitles': True, 'writeautomaticsub': True, 'skip_download': True, 'subtitleslangs': ['ar', 'en'], 'quiet': True})
 
         def download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -519,7 +508,7 @@ async def handle_other_text(message: types.Message):
         await message.answer("💡 أهلاً بك! أرسل رابطاً صحيحاً (رابط منشور أو حساب إنستجرام) للبدء.")
 
 async def main():
-    logging.info("🚀 البوت الأسطوري جاهز ويعمل بكفاءة مطلقة...")
+    logging.info("🚀 البوت الأسطوري الشامل يعمل بكفاءة تكامل الكوكيز...")
     await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == '__main__':
