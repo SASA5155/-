@@ -30,11 +30,10 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 ACTIVE_USERS = set()      
 URL_CACHE = {}            
 
-# دالة مساعدة لإضافة الكوكيز لـ yt-dlp تلقائياً إن وجدت
+# دالة مساعدة لربط الكوكيز وإعدادات التخفي
 def get_ydl_opts(base_opts: dict) -> dict:
     if os.path.exists("cookies.txt"):
         base_opts['cookiefile'] = "cookies.txt"
-    # إضافة ترويسات متصفح وهمي لمنع الحظر
     base_opts.setdefault('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
     return base_opts
 
@@ -508,7 +507,13 @@ async def handle_other_text(message: types.Message):
         await message.answer("💡 أهلاً بك! أرسل رابطاً صحيحاً (رابط منشور أو حساب إنستجرام) للبدء.")
 
 async def main():
-    logging.info("🚀 البوت الأسطوري الشامل يعمل بكفاءة تكامل الكوكيز...")
+    logging.info("🚀 جاري بدء تشغيل البوت ومسح أي تداخل سابق...")
+    # هذا السطر يحل مشكلة الـ Conflict نهائياً بحذف أي جثة بوت قديمة معلقة
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception:
+        pass
+    
     await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == '__main__':
