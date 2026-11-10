@@ -26,11 +26,20 @@ dp = Dispatcher()
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# دالة مساعدة لربط الكوكيز والتخفي
+# دالة مساعدة متطورة جداً لربط الكوكيز وتخطي حماية إنستجرام والتليجرام
 def get_ydl_opts(base_opts: dict) -> dict:
     if os.path.exists("cookies.txt"):
         base_opts['cookiefile'] = "cookies.txt"
-    base_opts.setdefault('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    
+    # إعدادات متطورة جداً لتجاوز حظر الـ IP وحماية إنستجرام عبر محاكاة متصفح موبايل
+    base_opts.update({
+        'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+        'referer': 'https://www.instagram.com/',
+        'http_headers': {
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Site': 'same-origin',
+        }
+    })
     return base_opts
 
 # --- قاعدة بيانات مبسطة للمشاركات فقط ---
@@ -208,7 +217,7 @@ async def callback_show_history(callback: types.CallbackQuery):
     except Exception:
         await callback.answer("❌ حدث خطأ / Error occurred.", show_alert=True)
 
-# --- معالجة الروابط مباشرة ---
+# --- معالجة الروابط مباشرة وتطبيق إعدادات الكوكيز ---
 @dp.message(F.text.regexp(r'https?://\S+'))
 async def handle_media_url(message: types.Message):
     user_id = message.from_user.id
@@ -222,11 +231,12 @@ async def handle_media_url(message: types.Message):
         return await message.answer("❌ لم أتمكن من العثور على رابط صحيح.")
     
     url = url_match.group(0)
-    process_msg = await message.answer("⏳ **جاري تحليل الرابط والتحميل الفوري...**", parse_mode="Markdown")
+    process_msg = await message.answer("⏳ **جاري تحليل الرابط والتحميل الفوري عبر المتصفح...**", parse_mode="Markdown")
 
     try:
         loop = asyncio.get_running_loop()
         
+        # دمج خيارات الـ yt-dlp مع الكوكيز وتخطي الحظر
         ydl_opts = get_ydl_opts({
             'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
             'format': 'best/bestvideo+bestaudio/best',
@@ -277,7 +287,7 @@ async def handle_other_text(message: types.Message):
     await message.answer("💡 أهلاً بك! أرسل رابط الفيديو مباشرة للتحميل الفوري 🚀\nWelcome! Send a video link directly to download.")
 
 async def main():
-    logging.info("🚀 البوت يعمل الآن بكامل طاقته واختيار اللغات مفعل...")
+    logging.info("🚀 البوت يعمل الآن بكامل طاقته وتجاوز حماية إنستجرام...")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except Exception:
