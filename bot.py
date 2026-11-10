@@ -25,22 +25,6 @@ dp = Dispatcher()
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# إعدادات متطورة جداً لتجاوز حظر إنستجرام وقراءة الكوكيز بدقة
-def get_ydl_opts(base_opts: dict) -> dict:
-    if os.path.exists("cookies.txt"):
-        base_opts['cookiefile'] = "cookies.txt"
-    
-    base_opts.update({
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        'referer': 'https://www.instagram.com/',
-        'extractor_args': {'instagram': {'api_hostname': 'i.instagram.com'}},
-        'nocheckcertificate': True,
-        'ignoreerrors': False,
-        'no_warnings': True,
-        'quiet': True
-    })
-    return base_opts
-
 def init_db():
     conn = sqlite3.connect('bot_database.db')
     cursor = conn.cursor()
@@ -118,7 +102,7 @@ async def cmd_start(message: types.Message):
                 [InlineKeyboardButton(text="📢 اشترك في القناة", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}")],
                 [InlineKeyboardButton(text="✅ تحقق من الاشتراك", callback_data="check_sub")]
             ])
-            return message.answer("⚠️ **يجب عليك الاشتراك في قناة البوت أولاً!**\nاشترك ثم اضغط تحقق 👇", reply_markup=keyboard)
+            return await message.answer("⚠️ **يجب عليك الاشتراك في قناة البوت أولاً!**\nاشترك ثم اضغط تحقق 👇", reply_markup=keyboard)
 
     lang_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -222,18 +206,23 @@ async def handle_media_url(message: types.Message):
         return await message.answer("❌ لم أتمكن من العثور على رابط صحيح.")
     
     url = url_match.group(0)
-    process_msg = await message.answer("⏳ **جاري جلب الفيديو الآن...**", parse_mode="Markdown")
+    process_msg = await message.answer("⏳ **جاري تحميل الفيديو فوراً...**", parse_mode="Markdown")
 
     filename = None
     try:
         loop = asyncio.get_running_loop()
         
-        # محاولة التحميل بالطريقة المباشرة
-        ydl_opts = get_ydl_opts({
+        # إعدادات بسيطة ونظيفة للغاية تدعم كل المنصات بدون تعقيد
+        ydl_opts = {
             'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
             'format': 'best',
-            'noplaylist': True
-        })
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+        }
+        
+        if os.path.exists("cookies.txt"):
+            ydl_opts['cookiefile'] = "cookies.txt"
 
         def download_media():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -261,35 +250,11 @@ async def handle_media_url(message: types.Message):
             
             await process_msg.delete()
         else:
-            await process_msg.edit_text("❌ لم يتم العثور على الملف.")
+            await process_msg.edit_text("❌ لم يتم العثور على الملف المحمل.")
 
     except Exception as e:
         logging.error(f"Download Error: {e}")
-        # محاولة بديلة سريعة لو فشلت الطريقة الأولى
-        try:
-            ydl_opts_fallback = get_ydl_opts({
-                'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
-                'format': 'bestvideo+bestaudio/best',
-                'merge_output_format': 'mp4',
-                'noplaylist': True
-            })
-            def download_fallback():
-                with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    return info, ydl.prepare_filename(info)
-            
-            info, filename = await loop.run_in_executor(None, download_fallback)
-            title = info.get('title', 'Media')
-            
-            if filename and os.path.exists(filename):
-                input_file = types.FSInputFile(filename)
-                await message.answer_video(video=input_file, caption=f"✅ **{title[:80]}**", parse_mode="Markdown")
-                await process_msg.delete()
-            else:
-                await process_msg.edit_text("❌ عذراً، تعذر التحميل. يجدر التذكير أن إنستجرام يحظر السيرفرات المجانية مؤقتاً.")
-        except Exception as err:
-            logging.error(f"Fallback Error: {err}")
-            await process_msg.edit_text("❌ عذراً، فشل التحميل. إنستجرام يفرض قيوداً صارمة على سيرفرات الاستضافة المجانية حالياً.")
+        await process_msg.edit_text("❌ عذراً، حدث خطأ أثناء التحميل. تأكد أن الرابط عام وصحيح.")
 
     finally:
         if filename and os.path.exists(filename):
@@ -303,12 +268,10 @@ async def handle_other_text(message: types.Message):
     await message.answer("💡 أهلاً بك! أرسل رابط الفيديو مباشرة للتحميل الفوري 🚀")
 
 async def main():
-    logging.info("🚀 البوت يعمل الآن...")
+    logging.info("🚀 البوت يعمل الآن بكفاءة ونظافة...")
     try:
         await bot.delete_webhook(drop_pending_updates=True)
     except Exception:
-        pass
-    async def startup():
         pass
     await dp.start_polling(bot, skip_updates=True)
 
